@@ -20,32 +20,39 @@ import base64
 import ast
 
 def generate_aes_key(password, salt):
+    # sets up the key derivation function
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         iterations=100000,
         salt=salt,
         length=32
     )
+    # derives the key from the password
     key = kdf.derive(password.encode('utf-8'))
+    # encodes the key in a base64 format
     key = base64.urlsafe_b64encode(key)
     return key
 
 # Lookup details on fernet in the cryptography.io documentation    
 def encrypt_with_aes(input_string, password, salt):
-    key = generate_aes_key(????)
-    f = Fernet(???)
-    encrypted_data = f.????(????.encode('utf-8')) #call the Fernet encrypt method
+    key = generate_aes_key(password, salt)
+    # creates a fernet object with the key
+    f = Fernet(key)
+    # encrypts the input string
+    encrypted_data = f.encrypt(input_string.encode('utf-8'))
     return encrypted_data    
 
 def decrypt_with_aes(encrypted_data, password, salt):
-    key = generate_aes_key(????)
-    f = Fernet(????)
-    decrypted_data = f.????(????) #call the Fernet decrypt method
+    key = generate_aes_key(password, salt)
+    # creates a fernet object with the key
+    f = Fernet(key)
+    # decrypts the encrypted data
+    decrypted_data = f.decrypt(encrypted_data)
     return decrypted_data.decode('utf-8')
 
-salt = ???? # Remember it should be a byte-object
-password = ?????
-input_string = ?????
+salt = b'Tandon' # Remember it should be a byte-object
+password = 'jzg216@nyu.edu'
+input_string = 'AlwaysWatching'
 
 encrypted_value = encrypt_with_aes(input_string, password, salt) # exfil function
 decrypted_value = decrypt_with_aes(encrypted_value, password, salt)  # exfil function
@@ -75,26 +82,43 @@ dns_records = {
             86400, #minimum
         ),
     },
-   
-    # Add more records as needed (see assignment instructions!
+    'safebank.com.': {
+        dns.rdatatype.A: '192.168.1.102',
+    },
+    'google.com.': {
+        dns.rdatatype.A: '192.168.1.103',
+    },
+    'legitsite.com.': {
+        dns.rdatatype.A: '192.168.1.104',
+    },
+    'yahoo.com.': {
+        dns.rdatatype.A: '192.168.1.105',
+    },
+    'nyu.edu.': {
+        dns.rdatatype.A: '192.168.1.106',
+        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
+        dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
+        dns.rdatatype.NS: 'ns1.nyu.edu.',
+        dns.rdatatype.TXT: (str(encrypted_value),),
+    },
 }
 
 def run_dns_server():
     # Create a UDP socket and bind it to the local IP address (what unique IP address is used here, similar to webserver lab) and port (the standard port for DNS)
-    server_socket = socket.socket(socket.AF_INET, ????) # Research this
-    server_socket.bind((?????, ????))
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # DNS uses UDP
+    server_socket.bind(('127.0.0.1', 53))
 
     while True:
         try:
             # Wait for incoming DNS requests
             data, addr = server_socket.recvfrom(1024)
-            # Parse the request using the `dns.message.from_wire` method
-            request = ?????
-            # Create a response message using the `dns.message.make_response` method
-            response = ??????
+            # parse the request
+            request = dns.message.from_wire(data)
+            # create a response
+            response = dns.message.make_response(request)
 
-            # Get the question from the request
-            question = request.question[???]
+            # get the question from the request
+            question = request.question[0]
             qname = question.name.to_text()
             qtype = question.rdtype
 
@@ -102,15 +126,15 @@ def run_dns_server():
             if qname in dns_records and qtype in dns_records[qname]:
                 # Retrieve the data for the record and create an appropriate `rdata` object for it
                 answer_data = dns_records[qname][qtype]
-
+                # create a list to hold the rdata objects
                 rdata_list = []
 
-                if qtype == dns.rdatatype.??:
+                if qtype == dns.rdatatype.MX:
                     for pref, server in answer_data:
                         rdata_list.append(MX(dns.rdataclass.IN, dns.rdatatype.MX, pref, server))
-                elif qtype == dns.rdatatype.??:
-                    ??, ??, ??, ??, ??, ??, ?? = answer_data # What is the record format? See dns_records dictionary. Assume we handle @, Class, TTL elsewhere. Do some research on SOA Records
-                    rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA, ??, ??, ??, ??, ??, ??, ??) # follow format from previous line
+                elif qtype == dns.rdatatype.SOA:
+                    mname, rname, serial, refresh, retry, expire, minimum = answer_data # What is the record format? See dns_records dictionary. Assume we handle @, Class, TTL elsewhere. Do some research on SOA Records
+                    rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA, mname, rname, serial, refresh, retry, expire, minimum) # follow format from previous line
                     rdata_list.append(rdata)
                 else:
                     if isinstance(answer_data, str):
@@ -126,7 +150,7 @@ def run_dns_server():
 
             # Send the response back to the client using the `server_socket.sendto` method and put the response to_wire(), return to the addr you received from
             print("Responding to request:", qname)
-            server_socket.??????? 
+            server_socket.sendto(response.to_wire(), addr)
         except KeyboardInterrupt:
             print('\nExiting...')
             server_socket.close()
